@@ -1,29 +1,257 @@
+#Weather 
+#!/usr/bin/env python3
+"""
+Weather CLI Application - Получение погоды через метеорологическое API
+Использует OpenWeatherMap API
+"""
+
+import os
+import sys
+import json
+import argparse
+from datetime import datetime
+from typing import Dict, Optional
+from dotenv import load_dotenv
 import requests
+from tabulate import tabulate
 
-API_KEY = 'bc86ceb1adcf0d727a54f89fa7ce48cd'  
+# Загрузка переменных окружения
+load_dotenv()
 
-BASE_URL = "http://api.openweathermap.org/data/2.5/weather?"
+class WeatherApp:
+    """Основной класс приложения для работы с погодным API"""
 
-def get_weather(city):
-    complete_url = f"{BASE_URL}appid={API_KEY}&q={city}"
-    response = requests.get(complete_url)
-    return response.json()
+    def init(self):
+        self.api_key = os.getenv('OPENWEATHER_API_KEY')
+        self.base_url = "https://api.openweathermap.org/data/2.5"
 
-def display_weather_data(weather_data):
-    if weather_data['cod'] != 200:
-        print("Город не найден или произошла ошибка.")
-        return
-    main_data = weather_data['main']
-    temperature = main_data['temp'] - 273.15  # преобразование в Цельсий
-    humidity = main_data['humidity']
-    weather_description = weather_data['weather']['description']
-    print(f"Температура в {city}: {temperature:.2f}°C, влажность: {humidity}%")
-    print(f"Описание погоды: {weather_description}") 
+        if not self.api_key:
+            print("❌ Ошибка: API ключ не найден!")
+            print("Создайте файл .env с переменной OPENWEATHER_API_KEY")
+            sys.exit(1)
+
+    def get_weather(self, city: str, units: str = 'metric') -> Optional[Dict]:
+        """
+        Получение текущей погоды для города
+        
+        Args:
+            city: Название города
+            units: Единицы измерения (metric/imperial)
+        
+        Returns:
+            Словарь с данными о погоде или None при ошибке
+        """
+        url = f"{self.base_url}/weather"
+        params = {
+            'q': city,
+            'appid': self.api_key,
+            'units': units,
+            'lang': 'ru'  # Русский язык для описаний
+        }
+
+        try:
+            response = requests.get(url, params=params, timeout=10)
+            response.raise_for_status()
+            return response.json()
+        except requests.exceptions.RequestException as e:
+            print(f"❌ Ошибка при запросе к API: {e}")
+            return None
+
+    def get_forecast(self, city: str, days: int = 5, units: str = 'metric') -> Optional[Dict]:
+        """
+        Получение прогноза погоды
+        
+        Args:
+            city: Название города
+            days: Количество дней прогноза (1-5)
+            units: Единицы измерения
+        
+        Returns:
+            Словарь с прогнозом или None при ошибке
+        """
+        url = f"{self.base_url}/forecast"
+        params = {
+            'q': city,
+            'appid': self.api_key,
+            'units': units,
+            'lang': 'ru',
+            'cnt': days * 8  # 8 периодов в день (каждые 3 часа)
+        }
+
+        try:
+            response = requests.get(url, params=params, timeout=10)
+            response.raise_for_status()
+            return response.json()
+        except requests.exceptions.RequestException as e:
+            print(f"❌ Ошибка при запросе к API: {e}")
+            return None
+
+    def display_weather(self, weather_data: Dict, units: str = 'metric'):
+        """Отображение текущей погоды"""
+        if not weather_data:
+            return
+
+        # Определение единиц измерения
+        temp_unit = "°C" if units == 'metric' else "°F"
+        speed_unit = "м/с" if units == 'metric' else "миль/ч"
+
+        # Основные данные
+        city = weather_data.get('name', 'Неизвестно')
+        country = weather_data.get('sys', {}).get('country', '')
+        temp = weather_data.get('main', {}).get('temp', 0)
+        feels_like = weather_data.get('main', {}).get('feels_like', 0)
+        humidity = weather_data.get('main', {}).get('humidity', 0)
+        pressure = weather_data.get('main', {}).get('pressure', 0)
+        wind_speed = weather_data.get('wind', {}).get('speed', 0)
+        description = weather_data.get('weather', [{}])[0].get('description', '')
+        sunrise = weather_data.get('sys', {}).get('sunrise', 0)
+        sunset = weather_data.get('sys', {}).get('sunset', 0)
+
+        # Создание таблицы для вывода
+        weather_table = [
+            ["📍 Город", f"{city}, {country}"],
+            ["🌡️ Температура", f"{temp:.1f}{temp_unit}"],
+            ["🤔 Ощущается как", f"{feels_like:.1f}{temp_unit}"],
+            ["💧 Влажность", f"{humidity}%"],
+["📊 Давление", f"{pressure} гПа"],
+            ["💨 Ветер", f"{wind_speed} {speed_unit}"],
+            ["🌤️ Погода", description.capitalize()],
+            ["🌅 Восход", datetime.fromtimestamp(sunrise).strftime('%H:%M:%S') if sunrise else "—"],
+            ["🌇 Закат", datetime.fromtimestamp(sunset).strftime('%H:%M:%S') if sunset else "—"]
+        ]
+
+        print("\n" + "="*50)
+        print(f" ТЕКУЩАЯ ПОГОДА")
+        print("="*50)
+        print(tabulate(weather_table, tablefmt="grid"))
+
+    def display_forecast(self, forecast_data: Dict, days: int, units: str = 'metric'):
+        """Отображение прогноза погоды"""
+        if not forecast_data:
+            return
+
+        temp_unit = "°C" if units == 'metric' else "°F"
+        city = forecast_data.get('city', {}).get('name', 'Неизвестно')
+        country = forecast_data.get('city', {}).get('country', '')
+
+        print("\n" + "="*80)
+        print(f" ПРОГНОЗ ПОГОДЫ ДЛЯ {city}, {country} НА {days} ДНЕЙ")
+        print("="*80)
+
+        # Группировка прогнозов по дням
+        forecasts_by_day = {}
+        for item in forecast_data.get('list', []):
+            date = datetime.fromtimestamp(item.get('dt', 0))
+            day_key = date.strftime('%Y-%m-%d')
+
+            if day_key not in forecasts_by_day:
+                forecasts_by_day[day_key] = []
+            forecasts_by_day[day_key].append(item)
+
+        # Отображение прогноза для каждого дня
+        for idx, (day, forecasts) in enumerate(forecasts_by_day.items()):
+            if idx >= days:
+                break
+
+            date_obj = datetime.strptime(day, '%Y-%m-%d')
+            day_name = date_obj.strftime('%A')
+
+            # Сбор статистики за день
+            temps = [f.get('main', {}).get('temp', 0) for f in forecasts]
+            temp_max = max(temps)
+            temp_min = min(temps)
+
+            # Средняя влажность и ветер
+            avg_humidity = sum(f.get('main', {}).get('humidity', 0) for f in forecasts) / len(forecasts)
+            avg_wind = sum(f.get('wind', {}).get('speed', 0) for f in forecasts) / len(forecasts)
+
+            # Описание погоды (наиболее частое)
+            weather_descs = [f.get('weather', [{}])[0].get('description', '') for f in forecasts]
+            main_weather = max(set(weather_descs), key=weather_descs.count)
+
+            forecast_table = [
+                ["📅 День", f"{day_name} ({day})"],
+                ["🌡️ Температура", f"Мин: {temp_min:.1f}{temp_unit} / Макс: {temp_max:.1f}{temp_unit}"],
+                ["💧 Влажность", f"{avg_humidity:.0f}%"],
+                ["💨 Ветер", f"{avg_wind:.1f} м/с"],
+                ["🌤️ Погода", main_weather.capitalize()]
+            ]
+
+            print(tabulate(forecast_table, tablefmt="grid"))
+            print()
+
+    def save_to_file(self, data: Dict, filename: str = 'weather_data.json'):
+        """Сохранение данных в JSON файл"""
+        try:
+            with open(filename, 'w', encoding='utf-8') as f:
+                json.dump(data, f, indent=2, ensure_ascii=False)
+            print(f"✅ Данные сохранены в файл: {filename}")
+        except Exception as e:
+            print(f"❌ Ошибка при сохранении файла: {e}")
 
 def main():
-    city = input("Введите название города: ")
-    weather_data = get_weather(city)
-    display_weather_data(weather_data)
+    """Главная функция приложения"""
+    parser = argparse.ArgumentParser(
+        description="🌤️ Weather CLI - Консольное приложение для получения погоды",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Примеры использования:
+  python weather.py --city London
+  python weather.py --city "New York" --units imperial
+  python weather.py --city Moscow --forecast --days 3
+  python weather.py --city Paris --save
+        """
+    )
 
-if __name__ == "__main__":
+    parser.add_argument('--city', '-c', type=str, required=True,
+                       help='Название города')
+    parser.add_argument('--units', '-u', type=str, choices=['metric', 'imperial'],
+default='metric', help='Единицы измерения (metric/imperial)')
+    parser.add_argument('--forecast', '-f', action='store_true',
+                       help='Показать прогноз погоды')
+    parser.add_argument('--days', '-d', type=int, default=3,
+                       help='Количество дней прогноза (1-5, по умолчанию: 3)')
+    parser.add_argument('--save', '-s', action='store_true',
+                       help='Сохранить результат в JSON файл')
+    parser.add_argument('--output', '-o', type=str, default='weather_data.json',
+                       help='Имя файла для сохранения (по умолчанию: weather_data.json)')
+
+    args = parser.parse_args()
+
+    # Проверка количества дней
+    if args.days < 1 or args.days > 5:
+        print("❌ Ошибка: количество дней должно быть от 1 до 5")
+        sys.exit(1)
+
+    # Создание экземпляра приложения
+    app = WeatherApp()
+
+    print(f"\n🔍 Поиск информации о погоде для города: {args.city}")
+
+    if args.forecast:
+        # Получение прогноза
+        forecast_data = app.get_forecast(args.city, args.days, args.units)
+
+        if forecast_data:
+            app.display_forecast(forecast_data, args.days, args.units)
+
+            if args.save:
+                app.save_to_file(forecast_data, args.output)
+        else:
+            print("❌ Не удалось получить прогноз погоды")
+            sys.exit(1)
+    else:
+        # Получение текущей погоды
+        weather_data = app.get_weather(args.city, args.units)
+
+        if weather_data:
+            app.display_weather(weather_data, args.units)
+
+            if args.save:
+                app.save_to_file(weather_data, args.output)
+        else:
+            print("❌ Не удалось получить текущую погоду")
+            sys.exit(1)
+
+if name == "main":
     main()
